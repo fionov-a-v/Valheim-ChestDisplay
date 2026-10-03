@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Тот же файл, что в моде: правила таблички (без Unity) -->
+    <Compile Include="../../src/Logic/DisplayRules.cs" Link="Mod/DisplayRules.cs" />
+  </ItemGroup>
+</Project>
