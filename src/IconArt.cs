@@ -120,7 +120,8 @@ namespace ChestDisplay
             return mesh;
         }
 
-        private static Material MaterialFor(Texture texture)
+        /// <summary>Материал для иконки или цифр: шейдер построек с вырезом по альфе (общий на текстуру).</summary>
+        public static Material MaterialFor(Texture texture)
         {
             if (texture == null || s_shader == null)
             {

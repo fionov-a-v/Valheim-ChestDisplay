@@ -1,22 +1,47 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.IO.Compression;
 using ChestDisplay.Logic;
+using ChestDisplay.Visuals;
 
 namespace ChestDisplay.Tests
 {
-    /// <summary>Проверки правил таблички (dotnet run --project tests/LogicTests).</summary>
+    /// <summary>
+    /// Проверки правил таблички и рисунка цифр (dotnet run --project tests/LogicTests -- &lt;папка для png&gt;):
+    /// с папкой — выгружает атлас цифр и числа, как их рисует мод, для превью (tests/sign_preview.py).
+    /// </summary>
     internal static class Program
     {
         private static int s_failed;
         private static int s_passed;
 
-        private static int Main()
+        /// <summary>Числа для превью: от одной цифры до самых длинных сокращений.</summary>
+        private static readonly string[] s_samples = { "7", "48", "999", "1.2k", "12k", "99k+" };
+
+        private static int Main(string[] args)
         {
             FirstSlot();
             Faces();
             Barrels();
+            Sizes();
+            Digits();
             Fitting();
             Parsing();
+
+            string outDir = args.Length > 0 ? args[0] : null;
+            if (outDir != null)
+            {
+                Directory.CreateDirectory(outDir);
+                byte[] atlas = DigitArt.Atlas(128, out int w, out int h);
+                WritePng(Path.Combine(outDir, "digits_atlas.png"), atlas, w, h);
+                foreach (string s in s_samples)
+                {
+                    byte[] text = RenderText(s, 128, out int tw, out int th);
+                    WritePng(Path.Combine(outDir, "num_" + s.Replace("+", "plus") + ".png"), text, tw, th);
+                }
+                Console.WriteLine($"PNG: {outDir}");
+            }
             Console.WriteLine($"passed {s_passed}, failed {s_failed}");
             return s_failed == 0 ? 0 : 1;
         }
@@ -35,13 +60,16 @@ namespace ChestDisplay.Tests
 
         private static void Faces()
         {
-            Check("нормаль +X → грань +X", DisplayRules.PickFace(1f, 0f, -1f, 0f) == Face.PosX);
-            Check("нормаль -Z → грань -Z", DisplayRules.PickFace(0f, -1f, 1f, 0f) == Face.NegZ);
-            Check("наклонная нормаль — по большей составляющей", DisplayRules.PickFace(0.3f, 0.8f, 0f, 0f) == Face.PosZ);
-            Check("смотрит на крышку → грань к игроку", DisplayRules.PickFace(0.05f, 0.02f, -2f, 0.5f) == Face.NegX);
-            Check("на крышку, игрок спереди-справа → +Z", DisplayRules.PickFace(0f, 0f, 0.4f, 3f) == Face.PosZ);
-            Check("скос крышки (нормаль чуть вбок) → всё ещё к игроку", DisplayRules.PickFace(0.45f, 0f, 0f, -1f) == Face.NegZ);
-            Check("заметно вбок — уже по нормали", DisplayRules.PickFace(0.6f, 0f, 0f, -1f) == Face.PosX);
+            Check("нормаль +X → грань +X", DisplayRules.PickFace(1f, 0f, 0f, -1f, 0f) == Face.PosX);
+            Check("нормаль -Z → грань -Z", DisplayRules.PickFace(0f, 0f, -1f, 1f, 0f) == Face.NegZ);
+            Check("наклонная нормаль — по большей составляющей", DisplayRules.PickFace(0.3f, 0.5f, 0.8f, 0f, 0f) == Face.PosZ);
+            Check("смотрит на крышку → на крышку", DisplayRules.PickFace(0.05f, 0.99f, 0.02f, -2f, 0.5f) == Face.Top);
+            Check("скос крышки (нормаль чуть вбок, вверх) → на крышку", DisplayRules.PickFace(0.45f, 0.89f, 0f, 0f, -1f) == Face.Top);
+            Check("заметно вбок — уже по нормали", DisplayRules.PickFace(0.6f, 0.8f, 0f, 0f, -1f) == Face.PosX);
+            Check("дно (нормаль вниз) → грань к игроку", DisplayRules.PickFace(0f, -1f, 0f, 0.4f, 3f) == Face.PosZ);
+
+            Check("на крышке: игрок спереди (+Z) → верх иконки к -Z", DisplayRules.TopUp(0.2f, 2f) == Face.NegZ);
+            Check("на крышке: игрок слева (-X) → верх иконки к +X", DisplayRules.TopUp(-2f, 0.5f) == Face.PosX);
 
             DisplayRules.FaceNormal(Face.NegX, out float x, out float z);
             Check("нормаль грани -X", x == -1f && z == 0f);
@@ -59,6 +87,92 @@ namespace ChestDisplay.Tests
             Check("армированный сундук — сундук", !DisplayRules.IsNotChest("piece_chest(Clone)", "$piece_chest"));
             Check("сундук из чёрного металла — сундук", !DisplayRules.IsNotChest("piece_chest_blackmetal(Clone)", "$piece_chestblackmetal"));
             Check("пустые имена — сундук", !DisplayRules.IsNotChest(null, ""));
+        }
+
+        private static void Sizes()
+        {
+            Check("0 % — стандартный размер", Near(DisplayRules.SignSize(0.34f, 0.65f, 0f), 0.34f));
+            Check("100 % — меньшая сторона поверхности", Near(DisplayRules.SignSize(0.34f, 0.65f, 100f), 0.65f));
+            Check("50 % — посередине", Near(DisplayRules.SignSize(0.34f, 0.64f, 50f), 0.49f));
+            Check("поверхность меньше стандартной — табличка не уменьшается", Near(DisplayRules.SignSize(0.34f, 0.2f, 100f), 0.34f));
+            Check("проценты за пределами 0–100 обрезаются",
+                Near(DisplayRules.SignSize(0.34f, 0.65f, 250f), 0.65f) && Near(DisplayRules.SignSize(0.34f, 0.65f, -5f), 0.34f));
+
+            Check("количество до 999 — как есть", DisplayRules.FormatCount(0) == "0" && DisplayRules.FormatCount(999) == "999");
+            Check("тысячи — с десятой вниз", DisplayRules.FormatCount(1250) == "1.2k" && DisplayRules.FormatCount(9999) == "9.9k");
+            Check("ровные тысячи — без .0", DisplayRules.FormatCount(1000) == "1k" && DisplayRules.FormatCount(3050) == "3k");
+            Check("десятки тысяч — целые k", DisplayRules.FormatCount(12345) == "12k" && DisplayRules.FormatCount(99999) == "99k");
+            Check("больше — 99k+", DisplayRules.FormatCount(100000) == "99k+" && DisplayRules.FormatCount(int.MaxValue) == "99k+");
+            foreach (int n in new[] { 0, 7, 42, 999, 1000, 1999, 9999, 10000, 54321, 99999, 100000, 5000000 })
+            {
+                string s = DisplayRules.FormatCount(n);
+                Check($"{n} → «{s}» не длиннее 4 знаков и рисуется целиком",
+                    s.Length <= 4 && DigitArt.Layout(s, out _).Count == s.Length);
+            }
+        }
+
+        private static void Digits()
+        {
+            Check("все символы атласа на месте", DigitArt.Count == DigitArt.Chars.Length);
+            List<GlyphPlace> places = DigitArt.Layout("1.2k", out float width);
+            Check("раскладка: 4 символа слева направо",
+                places.Count == 4 && places[0].X == 0f && places[1].X > places[0].X && places[3].X > places[2].X);
+            Check("раскладка: ширина = символы + промежутки",
+                Near(width, places[3].X + places[3].Width));
+            Check("неизвестные символы пропускаются", DigitArt.Layout("1a2", out _).Count == 2);
+            DigitArt.AtlasCell(0, out float a0, out float a1);
+            DigitArt.AtlasCell(DigitArt.Count - 1, out float b0, out float b1);
+            Check("клетки атласа: от 0 до 1 по порядку", a0 == 0f && a1 > a0 && b0 >= a1 && Near(b1, 1f));
+
+            byte[] atlas = DigitArt.Atlas(64, out int w, out int h);
+            bool allDrawn = true;
+            for (int g = 0; g < DigitArt.Count; g++)
+            {
+                DigitArt.AtlasCell(g, out float u0, out float u1);
+                int opaque = 0;
+                for (int y = 0; y < h; y++)
+                {
+                    for (int x = (int)(u0 * w); x < (int)(u1 * w); x++)
+                    {
+                        opaque += atlas[(y * w + x) * 4 + 3] > 128 ? 1 : 0;
+                    }
+                }
+                allDrawn &= opaque > 20;
+            }
+            Check("каждый символ в атласе нарисован", allDrawn);
+        }
+
+        /// <summary>Строка числа, как её собирает мод: клетки атласа одна за другой, со сдвигом по раскладке.</summary>
+        private static byte[] RenderText(string text, int unit, out int width, out int height)
+        {
+            byte[] atlas = DigitArt.Atlas(unit, out int aw, out int ah);
+            List<GlyphPlace> places = DigitArt.Layout(text, out float total);
+            width = (int)Math.Ceiling((total + 2f * DigitArt.Pad) * unit);
+            height = ah;
+            var px = new byte[width * height * 4];
+            foreach (GlyphPlace p in places)
+            {
+                DigitArt.AtlasCell(p.Glyph, out float u0, out float u1);
+                int sx0 = (int)Math.Round(u0 * aw), sx1 = (int)Math.Round(u1 * aw);
+                int dx0 = (int)Math.Round(p.X * unit);
+                for (int y = 0; y < height; y++)
+                {
+                    for (int sx = sx0; sx < sx1; sx++)
+                    {
+                        int dx = dx0 + sx - sx0;
+                        if (dx < 0 || dx >= width)
+                        {
+                            continue;
+                        }
+                        int s = (y * aw + sx) * 4, d = (y * width + dx) * 4;
+                        if (atlas[s + 3] > px[d + 3])
+                        {
+                            Buffer.BlockCopy(atlas, s, px, d, 4);
+                        }
+                    }
+                }
+            }
+            return px;
         }
 
         private static void Fitting()
@@ -102,6 +216,70 @@ namespace ChestDisplay.Tests
         }
 
         private static bool Near(float a, float b) => Math.Abs(a - b) < 1e-5f;
+
+        /// <summary>RGBA32, строки снизу вверх (как в Texture2D) → PNG с прозрачностью.</summary>
+        private static void WritePng(string path, byte[] rgba, int w, int h)
+        {
+            var raw = new byte[(w * 4 + 1) * h];
+            for (int y = 0; y < h; y++)
+            {
+                raw[y * (w * 4 + 1)] = 0;
+                Buffer.BlockCopy(rgba, (h - 1 - y) * w * 4, raw, y * (w * 4 + 1) + 1, w * 4);
+            }
+            using var fs = File.Create(path);
+            fs.Write(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 });
+            var ihdr = new byte[13];
+            BigEndian(ihdr, 0, w);
+            BigEndian(ihdr, 4, h);
+            ihdr[8] = 8;
+            ihdr[9] = 6;
+            Chunk(fs, "IHDR", ihdr);
+            using (var ms = new MemoryStream())
+            {
+                using (var z = new ZLibStream(ms, CompressionLevel.Optimal, true))
+                {
+                    z.Write(raw, 0, raw.Length);
+                }
+                Chunk(fs, "IDAT", ms.ToArray());
+            }
+            Chunk(fs, "IEND", Array.Empty<byte>());
+        }
+
+        private static void Chunk(Stream s, string type, byte[] data)
+        {
+            var len = new byte[4];
+            BigEndian(len, 0, data.Length);
+            s.Write(len);
+            byte[] t = System.Text.Encoding.ASCII.GetBytes(type);
+            s.Write(t);
+            s.Write(data);
+            uint crc = Crc(t, 0xFFFFFFFFu);
+            crc = Crc(data, crc) ^ 0xFFFFFFFFu;
+            var c = new byte[4];
+            BigEndian(c, 0, (int)crc);
+            s.Write(c);
+        }
+
+        private static uint Crc(byte[] data, uint crc)
+        {
+            foreach (byte b in data)
+            {
+                crc ^= b;
+                for (int k = 0; k < 8; k++)
+                {
+                    crc = (crc & 1) != 0 ? 0xEDB88320u ^ (crc >> 1) : crc >> 1;
+                }
+            }
+            return crc;
+        }
+
+        private static void BigEndian(byte[] b, int o, int v)
+        {
+            b[o] = (byte)(v >> 24);
+            b[o + 1] = (byte)(v >> 16);
+            b[o + 2] = (byte)(v >> 8);
+            b[o + 3] = (byte)v;
+        }
 
         private static void Check(string name, bool ok)
         {

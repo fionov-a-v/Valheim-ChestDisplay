@@ -12,8 +12,9 @@ namespace ChestDisplay
 {
     /// <summary>
     /// Префаб таблички — клон ванильной таблички с надписью (sign): берутся её постройка, прочность, звуки и деревянный
-    /// материал, а текст убирается. Вид: тёмная рамка, светлая доска поверх и иконка предмета на ней.
-    /// Корень префаба — центр доски, лицевая сторона смотрит в +Z.
+    /// материал, а надпись убирается. Вид: тёмная рамка, светлая доска поверх, иконка предмета на ней и (если включено)
+    /// число внизу доски — тогда иконка чуть меньше и выше. Корень префаба — центр доски, лицевая сторона смотрит в +Z;
+    /// всё видимое и коллайдер — в дочернем объекте ChestSign.VisualName (его масштабирует размер таблички).
     /// </summary>
     internal static class SignPiece
     {
@@ -39,6 +40,18 @@ namespace ChestDisplay
         public const float Thickness = 0.03f;
 
         private const float FrameDepth = 0.02f;
+
+        /// <summary>
+        /// Число внизу доски: высота символа и центр строки, м (по превью tests/sign_preview.py: «99k+» помещается
+        /// с запасом, между иконкой и числом ~2 см). С числом иконка уменьшается и поднимается, чтобы не наезжать на него.
+        /// </summary>
+        public const float NumberHeight = 0.064f;
+        public const float NumberCenterY = -PanelSize * 0.5f + 0.012f + NumberHeight * 0.5f;
+        public const float IconScaleWithCount = 0.76f;
+        public const float IconShiftWithCount = 0.045f;
+
+        /// <summary>Иконка и число лежат чуть впереди лицевой стороны доски (щель против мерцания).</summary>
+        public const float FrontZ = Thickness * 0.5f + 0.003f;
 
         /// <summary>На сколько центр таблички отстоит от поверхности сундука: половина толщины и щель против мерцания.</summary>
         public const float BackOffset = Thickness * 0.5f + 0.002f;
@@ -107,7 +120,7 @@ namespace ChestDisplay
 
         /// <summary>
         /// Доска ванильной таблички (куб 1 × 0.5 × 0.1) становится светлой доской, за ней — тёмная рамка из того же куба,
-        /// перед ней — иконка. Коллайдер — по рамке.
+        /// перед ней — иконка и число. Коллайдер — по рамке. Всё это — внутри одного узла (VisualName).
         /// </summary>
         private static void BuildVisual(GameObject prefab, out MeshFilter icon, out MeshRenderer iconRenderer)
         {
@@ -146,11 +159,28 @@ namespace ChestDisplay
             darkWood.color = wood.color * new Color(0.45f, 0.4f, 0.36f, 1f);
             frameRenderer.sharedMaterial = darkWood;
 
-            // Иконка — прямо на корне, а не в «New»: при износе (смене вида постройки) она не должна пропадать.
+            // Узел для всего видимого: дочерние объекты корня (коллайдер, «New» с доской и рамкой) переезжают в него.
+            var visual = new GameObject(ChestSign.VisualName);
+            visual.layer = board.gameObject.layer;
+            visual.transform.SetParent(prefab.transform, false);
+            var children = new List<Transform>();
+            foreach (Transform child in prefab.transform)
+            {
+                if (child != visual.transform)
+                {
+                    children.Add(child);
+                }
+            }
+            foreach (Transform child in children)
+            {
+                child.SetParent(visual.transform, false);
+            }
+
+            // Иконка — в узле, а не в «New»: при износе (смене вида постройки) она не должна пропадать.
             var iconGo = new GameObject(ChestSign.IconName);
             iconGo.layer = board.gameObject.layer;
-            iconGo.transform.SetParent(prefab.transform, false);
-            iconGo.transform.localPosition = new Vector3(0f, 0f, Thickness * 0.5f + 0.003f);
+            iconGo.transform.SetParent(visual.transform, false);
+            iconGo.transform.localPosition = new Vector3(0f, 0f, FrontZ);
             icon = iconGo.AddComponent<MeshFilter>();
             iconRenderer = iconGo.AddComponent<MeshRenderer>();
             iconRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
@@ -162,7 +192,9 @@ namespace ChestDisplay
                 box.size = new Vector3(BoardSize, BoardSize, Thickness);
             }
 
-            // Рамка и иконка видны и исчезают вдали вместе с доской.
+            Renderer[] countRenderers = BuildCount(visual.transform, board.gameObject.layer);
+
+            // Рамка, иконка и число видны и исчезают вдали вместе с доской.
             LODGroup lod = prefab.GetComponent<LODGroup>();
             if (lod != null)
             {
@@ -174,11 +206,30 @@ namespace ChestDisplay
                         continue;
                     }
                     var renderers = new List<Renderer>(lods[i].renderers) { frameRenderer, iconRenderer };
+                    renderers.AddRange(countRenderers);
                     lods[i].renderers = renderers.ToArray();
                 }
                 lod.SetLODs(lods);
                 lod.RecalculateBounds();
             }
+        }
+
+        /// <summary>
+        /// Число внизу доски (NumberArt — цифры атласа DigitArt). По умолчанию выключено (объект неактивен) —
+        /// включает ChestSign по настройке ShowItemCount.
+        /// </summary>
+        private static Renderer[] BuildCount(Transform visual, int layer)
+        {
+            var count = new GameObject(ChestSign.CountName);
+            count.layer = layer;
+            count.transform.SetParent(visual, false);
+            count.transform.localPosition = new Vector3(0f, NumberCenterY, FrontZ);
+            count.AddComponent<MeshFilter>();
+            MeshRenderer renderer = count.AddComponent<MeshRenderer>();
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            renderer.enabled = false;
+            count.SetActive(false);
+            return new Renderer[] { renderer };
         }
 
         /// <summary>Применить рецепт, станок и «можно строить» из (синхронизированного) конфига к уже созданному префабу.</summary>

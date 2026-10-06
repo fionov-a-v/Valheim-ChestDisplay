@@ -13,7 +13,7 @@ namespace ChestDisplay
     {
         public const string PluginGuid = "chestdisplay";
         public const string PluginName = "Chest Display";
-        public const string PluginVersion = "1.0.0";
+        public const string PluginVersion = "1.1.0";
 
         private Harmony m_harmony;
         private ConfigFileWatcher m_configWatcher;
@@ -29,6 +29,7 @@ namespace ChestDisplay
             PrefabManager.OnPrefabsRegistered += SignPiece.ApplyRecipe;
             SynchronizationManager.OnConfigurationSynchronized += (_, _) => SignPiece.ApplyRecipe();
             SignConfig.RecipeChanged += SignPiece.ApplyRecipe;
+            SignConfig.LookChanged += ChestSign.RefreshAll;
 
             m_harmony = new Harmony(PluginGuid);
             m_harmony.PatchAll(typeof(Patches));

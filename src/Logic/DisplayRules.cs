@@ -1,15 +1,17 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace ChestDisplay.Logic
 {
-    /// <summary>Боковая грань сундука в его собственных координатах.</summary>
+    /// <summary>Грань сундука в его собственных координатах: четыре боковые и верх (крышка).</summary>
     public enum Face
     {
         PosX = 0,
         NegX = 1,
         PosZ = 2,
         NegZ = 3,
+        Top = 4,
     }
 
     /// <summary>Как вписать иконку предмета в квадрат таблички: масштаб и центр в единицах спрайта.</summary>
@@ -46,15 +48,19 @@ namespace ChestDisplay.Logic
         }
 
         /// <summary>
-        /// На какую боковую грань вешать табличку. По нормали поверхности, куда смотрит игрок (в координатах сундука);
-        /// если он смотрит на крышку или дно (нормаль почти вертикальна) — на грань, обращённую к игроку
+        /// На какую грань вешать табличку — по нормали поверхности, куда смотрит игрок (в координатах сундука).
+        /// Нормаль почти вертикальна и смотрит вверх — на крышку; вниз (дно) — на боковую грань, обращённую к игроку
         /// (vx, vz — направление от центра сундука к игроку).
         /// </summary>
-        public static Face PickFace(float nx, float nz, float vx, float vz)
+        public static Face PickFace(float nx, float ny, float nz, float vx, float vz)
         {
             float x = nx, z = nz;
             if (x * x + z * z < 0.25f)
             {
+                if (ny > 0f)
+                {
+                    return Face.Top;
+                }
                 x = vx;
                 z = vz;
             }
@@ -65,7 +71,51 @@ namespace ChestDisplay.Logic
             return z >= 0f ? Face.PosZ : Face.NegZ;
         }
 
-        /// <summary>Наружная нормаль грани: (x, z).</summary>
+        /// <summary>
+        /// Табличка на крышке: куда (по осям сундука) смотрит верх иконки — от игрока (vx, vz — направление от центра
+        /// сундука к игроку), чтобы она читалась с того места, откуда её поставили.
+        /// </summary>
+        public static Face TopUp(float vx, float vz) => Math.Abs(vx) >= Math.Abs(vz)
+            ? (vx > 0f ? Face.NegX : Face.PosX)
+            : (vz > 0f ? Face.NegZ : Face.PosZ);
+
+        /// <summary>
+        /// Сторона квадратной таблички: при 0 % — стандартная, при 100 % — наименьший размер поверхности, на которой она
+        /// висит (если он больше стандартной; меньше стандартной табличка не становится), между ними — линейно.
+        /// </summary>
+        public static float SignSize(float standard, float surfaceMin, float percent)
+        {
+            float p = Math.Max(0f, Math.Min(100f, percent)) / 100f;
+            float max = Math.Max(standard, surfaceMin);
+            return standard + (max - standard) * p;
+        }
+
+        /// <summary>
+        /// Число на табличке — не длиннее 4 знаков, чтобы всегда помещалось: до 999 — как есть, до 9999 — тысячи с одной
+        /// десятой (1.2k, ровно — 1k), до 99 999 — целые тысячи (12k), больше — «99k+». Округление вниз: табличка
+        /// не обещает больше, чем лежит.
+        /// </summary>
+        public static string FormatCount(int count)
+        {
+            if (count < 1000)
+            {
+                return Math.Max(0, count).ToString(CultureInfo.InvariantCulture);
+            }
+            if (count < 10000)
+            {
+                int tenths = count / 100;
+                return tenths % 10 == 0
+                    ? (tenths / 10).ToString(CultureInfo.InvariantCulture) + "k"
+                    : (tenths / 10).ToString(CultureInfo.InvariantCulture) + "." + (tenths % 10).ToString(CultureInfo.InvariantCulture) + "k";
+            }
+            if (count < 100000)
+            {
+                return (count / 1000).ToString(CultureInfo.InvariantCulture) + "k";
+            }
+            return "99k+";
+        }
+
+        /// <summary>Наружная нормаль боковой грани: (x, z).</summary>
         public static void FaceNormal(Face face, out float x, out float z)
         {
             x = face == Face.PosX ? 1f : (face == Face.NegX ? -1f : 0f);

@@ -5,8 +5,8 @@ using UnityEngine;
 namespace ChestDisplay
 {
     /// <summary>
-    /// К каким сундукам крепится табличка и куда именно: по центру боковой грани, обращённой к игроку,
-    /// вплотную к поверхности (с учётом выступов — оковки).
+    /// К каким сундукам крепится табличка и куда именно: по центру боковой грани, обращённой к игроку (ниже крышки),
+    /// или сверху на крышку — вплотную к поверхности (с учётом выступов — оковки).
     /// </summary>
     internal static class ChestMount
     {
@@ -89,36 +89,147 @@ namespace ChestDisplay
             return chest != null ? chest : piece.GetComponentInChildren<Container>();
         }
 
-        /// <summary>
-        /// Где встанет табличка: центр корня таблички (её задняя сторона прижата к сундуку) и поворот (лицом наружу).
-        /// </summary>
-        public static bool TryPose(Container chest, Vector3 hitPoint, Vector3 hitNormal, Vector3 viewer, out Vector3 position,
-            out Quaternion rotation)
+        /// <summary>Куда встаёт табличка на сундуке.</summary>
+        public struct Mount
         {
-            position = hitPoint;
-            rotation = Quaternion.identity;
+            public Face Face;
+
+            /// <summary>Центр корня таблички (её задняя сторона прижата к сундуку), мир.</summary>
+            public Vector3 Position;
+
+            /// <summary>Лицевая сторона (+Z) — наружу от сундука; у таблички на крышке верх иконки — от игрока.</summary>
+            public Quaternion Rotation;
+
+            /// <summary>Меньшая сторона поверхности под табличкой, м (боковина ниже крышки или верх крышки).</summary>
+            public float SurfaceMin;
+        }
+
+        /// <summary>Поверхность для таблички в координатах корня сундука.</summary>
+        private struct Surface
+        {
+            public Vector3 Center;
+            public Vector3 Outward;
+            public float Width;
+            public float Height;
+
+            /// <summary>Поверхность — верх крышки (у крышки нет коллайдера, её высоту даёт меш).</summary>
+            public bool FromLid;
+        }
+
+        /// <summary>
+        /// Доля меньшей стороны поверхности, которую табличка занимает при 100 %, чтобы рамка не свисала с кромки:
+        /// на боковине почти вся, на крышке — 90 % (крышки скруглены и сужаются к верху, на 98 % табличка торчала).
+        /// </summary>
+        private const float SideFill = 0.98f;
+        private const float TopFill = 0.90f;
+
+        private static float Fill(Face face) => face == Face.Top ? TopFill : SideFill;
+
+        /// <summary>
+        /// Где встанет табличка: на грань, куда смотрит игрок (боковина — по центру её части ниже крышки, крышка — по центру
+        /// сверху), вплотную к поверхности, размером по настройке SizePercent.
+        /// </summary>
+        public static bool TryMount(Container chest, Vector3 hitNormal, Vector3 viewer, out Mount mount)
+        {
+            mount = default;
             Transform root = PieceRoot(chest);
             if (!LocalBounds(root, out Bounds bounds))
             {
                 return false;
             }
-
             Vector3 n = root.InverseTransformDirection(hitNormal);
             Vector3 toViewer = root.InverseTransformPoint(viewer) - bounds.center;
-            Face face = DisplayRules.PickFace(n.x, n.z, toViewer.x, toViewer.z);
+            Face face = DisplayRules.PickFace(n.x, n.y, n.z, toViewer.x, toViewer.z);
+            Surface surface = SurfaceOf(chest, root, bounds, face);
+
+            mount.Face = face;
+            mount.SurfaceMin = Mathf.Min(surface.Width, surface.Height) * Fill(face);
+            float size = SignSize(mount.SurfaceMin);
+
+            Vector3 outward = root.TransformDirection(surface.Outward).normalized;
+            Vector3 up;
+            if (face == Face.Top)
+            {
+                DisplayRules.FaceNormal(DisplayRules.TopUp(toViewer.x, toViewer.z), out float ux, out float uz);
+                up = root.TransformDirection(new Vector3(ux, 0f, uz)).normalized;
+            }
+            else
+            {
+                up = root.up;
+            }
+            Vector3 center = root.TransformPoint(surface.Center);
+            float depth = surface.FromLid ? 0f : Depth(center, outward, up, size);
+            mount.Position = center + outward * (depth + SignPiece.BackOffset);
+            mount.Rotation = Quaternion.LookRotation(outward, up);
+            return true;
+        }
+
+        /// <summary>
+        /// Для висящей таблички: на какой грани сундука она висит (по тому, куда смотрит её лицевая сторона) и меньшая
+        /// сторона этой поверхности — от неё считается размер.
+        /// </summary>
+        public static bool TryGetSurface(Container chest, Transform sign, out Face face, out float surfaceMin)
+        {
+            face = Face.PosZ;
+            surfaceMin = 0f;
+            Transform root = PieceRoot(chest);
+            if (!LocalBounds(root, out Bounds bounds))
+            {
+                return false;
+            }
+            Vector3 f = root.InverseTransformDirection(sign.forward);
+            face = DisplayRules.PickFace(f.x, f.y, f.z, f.x, f.z);
+            Surface surface = SurfaceOf(chest, root, bounds, face);
+            surfaceMin = Mathf.Min(surface.Width, surface.Height) * Fill(face);
+            return true;
+        }
+
+        /// <summary>Сторона таблички по настройке SizePercent для поверхности с меньшей стороной surfaceMin.</summary>
+        public static float SignSize(float surfaceMin) =>
+            DisplayRules.SignSize(SignPiece.BoardSize, surfaceMin, SignConfig.SizePercent.Value);
+
+        /// <summary>
+        /// Поверхность грани. Боковина — от низа сундука до низа крышки (на крышке табличка мешала бы её открывать),
+        /// во всю ширину грани. Верх — верх закрытой крышки (по её мешу; если крышки нет — верх коллайдеров).
+        /// </summary>
+        private static Surface SurfaceOf(Container chest, Transform root, Bounds bounds, Face face)
+        {
+            bool lid = LidBounds(chest, root, bounds, out Bounds lidBounds);
+            if (face == Face.Top)
+            {
+                Bounds top = lid ? lidBounds : bounds;
+                return new Surface
+                {
+                    Center = new Vector3(top.center.x, top.max.y, top.center.z),
+                    Outward = Vector3.up,
+                    Width = top.size.x,
+                    Height = top.size.z,
+                    FromLid = lid,
+                };
+            }
             DisplayRules.FaceNormal(face, out float fx, out float fz);
-            var outwardLocal = new Vector3(fx, 0f, fz);
+            var outward = new Vector3(fx, 0f, fz);
+            float bottom = bounds.min.y;
+            float topY = lid ? Mathf.Min(lidBounds.min.y, bounds.max.y) : bounds.max.y;
+            Vector3 center = bounds.center + Vector3.Scale(outward, bounds.extents);
+            center.y = (bottom + topY) * 0.5f;
+            return new Surface
+            {
+                Center = center,
+                Outward = outward,
+                Width = fx != 0f ? bounds.size.z : bounds.size.x,
+                Height = topY - bottom,
+            };
+        }
 
-            // Центр грани по рамке коллайдеров; по высоте — середина сундука (ниже крышки у всех ванильных сундуков).
-            Vector3 faceCenterLocal = bounds.center + Vector3.Scale(outwardLocal, bounds.extents);
-            Vector3 center = root.TransformPoint(faceCenterLocal);
-            Vector3 outward = root.TransformDirection(outwardLocal).normalized;
-            Vector3 up = root.up;
+        /// <summary>
+        /// Насколько поверхность ближе плоскости грани: лучи снаружи в центр и в углы таблички, берём самую
+        /// выступающую точку — табличка ляжет на выступы (оковку) и не провалится в них.
+        /// </summary>
+        private static float Depth(Vector3 center, Vector3 outward, Vector3 up, float size)
+        {
             Vector3 right = Vector3.Cross(up, outward).normalized;
-
-            // Насколько поверхность ближе плоскости грани: лучи снаружи в центр и в углы таблички, берём самую
-            // выступающую точку — табличка ляжет на выступы и не провалится в них.
-            float half = SignPiece.BoardSize * 0.5f * 0.8f;
+            float half = size * 0.5f * 0.8f;
             float depth = float.NegativeInfinity;
             const float start = 0.5f;
             for (int i = 0; i < 5; i++)
@@ -134,14 +245,91 @@ namespace ChestDisplay
                     }
                 }
             }
-            if (float.IsNegativeInfinity(depth))
-            {
-                depth = 0f;
-            }
+            return float.IsNegativeInfinity(depth) ? 0f : depth;
+        }
 
-            position = center + outward * (depth + SignPiece.BackOffset);
-            rotation = Quaternion.LookRotation(outward, up);
+        /// <summary>
+        /// Рамка закрытой крышки (Container.m_closed) в координатах корня сундука. Крышкой считается, только если она
+        /// в верхней части сундука: у некоторых модовых сундуков «закрытым видом» может быть весь сундук.
+        /// </summary>
+        private static bool LidBounds(Container chest, Transform root, Bounds body, out Bounds lid)
+        {
+            lid = default;
+            if (chest.m_closed == null || !MeshBounds(chest.m_closed, root, out lid))
+            {
+                return false;
+            }
+            return lid.min.y > body.min.y + body.size.y * 0.3f && lid.size.x > 0.05f && lid.size.z > 0.05f;
+        }
+
+        /// <summary>Рамка всех мешей объекта (вместе с неактивными) в координатах root.</summary>
+        private static bool MeshBounds(GameObject go, Transform root, out Bounds bounds)
+        {
+            bounds = default;
+            bool any = false;
+            Vector3 min = Vector3.zero, max = Vector3.zero;
+            foreach (MeshFilter mf in go.GetComponentsInChildren<MeshFilter>(true))
+            {
+                if (mf.sharedMesh == null)
+                {
+                    continue;
+                }
+                Bounds b = mf.sharedMesh.bounds;
+                for (int i = 0; i < 8; i++)
+                {
+                    var corner = new Vector3(
+                        (i & 1) == 0 ? b.min.x : b.max.x,
+                        (i & 2) == 0 ? b.min.y : b.max.y,
+                        (i & 4) == 0 ? b.min.z : b.max.z);
+                    Vector3 p = root.InverseTransformPoint(mf.transform.TransformPoint(corner));
+                    min = any ? Vector3.Min(min, p) : p;
+                    max = any ? Vector3.Max(max, p) : p;
+                    any = true;
+                }
+            }
+            if (any)
+            {
+                bounds.SetMinMax(min, max);
+            }
+            return any;
+        }
+
+        /// <summary>
+        /// Как сдвигается крышка при открытии: матрица из положения закрытой крышки в положение открытой (в мире).
+        /// Закрытая и открытая крышки у ванильных сундуков — два объекта с одним и тем же мешем (Container.m_closed и
+        /// m_open), поэтому табличка на крышке, сдвинутая той же матрицей, остаётся на ней. Сравниваются первые меши
+        /// в каждом (у сундука из чёрного металла m_closed/m_open — группы с крышкой внутри).
+        /// </summary>
+        public static bool TryLidMotion(Container chest, out Matrix4x4 motion)
+        {
+            motion = Matrix4x4.identity;
+            if (chest == null || chest.m_open == null || chest.m_closed == null)
+            {
+                return false;
+            }
+            MeshFilter closed = FirstMesh(chest.m_closed);
+            MeshFilter open = FirstMesh(chest.m_open);
+            if (closed == null || open == null || closed.sharedMesh.name != open.sharedMesh.name)
+            {
+                return false;
+            }
+            motion = open.transform.localToWorldMatrix * closed.transform.worldToLocalMatrix;
             return true;
+        }
+
+        /// <summary>Открыт ли сундук (виден открытый вид крышки) — так его показывает сама игра, и у других игроков тоже.</summary>
+        public static bool IsOpen(Container chest) => chest != null && chest.m_open != null && chest.m_open.activeInHierarchy;
+
+        private static MeshFilter FirstMesh(GameObject go)
+        {
+            foreach (MeshFilter mf in go.GetComponentsInChildren<MeshFilter>(true))
+            {
+                if (mf.sharedMesh != null)
+                {
+                    return mf;
+                }
+            }
+            return null;
         }
 
         /// <summary>Есть ли уже табличка на этом месте.</summary>

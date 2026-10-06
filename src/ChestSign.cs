@@ -7,15 +7,21 @@ namespace ChestDisplay
 {
     /// <summary>
     /// Табличка на сундуке. Находит сундук у себя за спиной и показывает иконку его первого предмета (верхняя левая
-    /// занятая ячейка). Иконка меняется сразу, как меняется содержимое: на событие инвентаря сундука (оно приходит и при
-    /// изменении у этого игрока, и когда игра подгружает чужие изменения из сети — раз в секунду), плюс редкая проверка
-    /// на всякий случай. Наведение и «Использовать» передаются сундуку — сквозь табличку сундук открывается как обычно.
+    /// занятая ячейка), а если включено — сколько этого предмета в сундуке (числом внизу доски). Иконка меняется сразу, как меняется
+    /// содержимое: на событие инвентаря сундука (оно приходит и при изменении у этого игрока, и когда игра подгружает
+    /// чужие изменения из сети — раз в секунду), плюс редкая проверка на всякий случай. Наведение и «Использовать»
+    /// передаются сундуку — сквозь табличку сундук открывается как обычно.
+    /// Размер — по настройке SizePercent от меньшей стороны поверхности, на которой табличка висит. Табличка на крышке
+    /// при открытии сундука уезжает вместе с крышкой.
     /// Сундук разрушили или разобрали — табличка снимается вместе с ним (ресурсы выпадают); табличка, за которой сундука
     /// нет вовсе, тоже отваливается.
     /// </summary>
     public class ChestSign : MonoBehaviour, Hoverable, Interactable
     {
+        /// <summary>Всё видимое и коллайдер таблички: масштабируется по размеру и ездит с крышкой.</summary>
+        public const string VisualName = "chestdisplay_visual";
         public const string IconName = "chestdisplay_icon";
+        public const string CountName = "chestdisplay_count";
 
         /// <summary>Таблички в мире (без призрака при строительстве).</summary>
         public static readonly List<ChestSign> All = new List<ChestSign>();
@@ -28,8 +34,13 @@ namespace ChestDisplay
 
         private ZNetView m_nview;
         private WearNTear m_wear;
+        private Transform m_visual;
+        private Transform m_icon;
         private MeshFilter m_iconFilter;
         private MeshRenderer m_iconRenderer;
+        private GameObject m_count;
+        private MeshFilter m_countFilter;
+        private MeshRenderer m_countRenderer;
         private bool m_ghost;
 
         private Container m_chest;
@@ -38,13 +49,30 @@ namespace ChestDisplay
         private ItemDrop.ItemData m_item;
         private Sprite m_shown;
         private bool m_applied;
+        private int m_shownCount = -1;
         private bool m_dirty;
         private float m_nextSearch;
         private float m_nextPoll;
         private int m_orphanSearches;
 
+        private Face m_face = Face.PosZ;
+        private bool m_lidPosed;
+
         /// <summary>Сундук, на котором висит табличка (null, пока не найден).</summary>
         public Container Chest => m_chest;
+
+        /// <summary>Настройки вида поменялись (размер, количество) — пересчитать все таблички.</summary>
+        public static void RefreshAll()
+        {
+            foreach (ChestSign sign in All)
+            {
+                if (sign != null && sign.m_chest != null)
+                {
+                    sign.RefreshLayout();
+                    sign.m_dirty = true;
+                }
+            }
+        }
 
         private void Awake()
         {
@@ -52,13 +80,25 @@ namespace ChestDisplay
             m_ghost = ZNetView.m_forceDisableInit;
             m_nview = GetComponent<ZNetView>();
             m_wear = GetComponent<WearNTear>();
-            Transform icon = transform.Find(IconName);
-            if (icon != null)
+            m_visual = transform.Find(VisualName);
+            if (m_visual == null)
             {
-                m_iconFilter = icon.GetComponent<MeshFilter>();
-                m_iconRenderer = icon.GetComponent<MeshRenderer>();
+                m_visual = transform;
             }
-            Show(null);
+            m_icon = m_visual.Find(IconName);
+            if (m_icon != null)
+            {
+                m_iconFilter = m_icon.GetComponent<MeshFilter>();
+                m_iconRenderer = m_icon.GetComponent<MeshRenderer>();
+            }
+            Transform count = m_visual.Find(CountName);
+            if (count != null)
+            {
+                m_count = count.gameObject;
+                m_countFilter = count.GetComponent<MeshFilter>();
+                m_countRenderer = count.GetComponent<MeshRenderer>();
+            }
+            Show(null, null);
             if (!m_ghost)
             {
                 All.Add(this);
@@ -82,7 +122,8 @@ namespace ChestDisplay
                 if (m_inventory != null)
                 {
                     Unlink(); // сундук пропал (выгружен или уничтожен)
-                    Show(null);
+                    Show(null, null);
+                    ResetPose();
                 }
                 if (Time.time < m_nextSearch)
                 {
@@ -102,14 +143,15 @@ namespace ChestDisplay
             {
                 m_dirty = false;
                 m_nextPoll = Time.time + PollInterval;
-                Show(FirstItem(m_inventory));
+                Show(FirstItem(m_inventory), m_inventory);
             }
+            UpdateLid();
         }
 
         /// <summary>
         /// За табличкой нет сундука: его разобрали или сломали, пока табличка не была с ним связана, или она висит на том,
-        /// что сундуком не считается (бочка, бродильня — поставлена старой версией мода). Если местность вокруг загружена
-        /// целиком, а сундука всё нет несколько проверок подряд — табличка отваливается, ресурсы выпадают. Решает владелец.
+        /// что сундуком не считается. Если местность вокруг загружена целиком, а сундука всё нет несколько проверок
+        /// подряд — табличка отваливается, ресурсы выпадают. Решает владелец.
         /// </summary>
         private void CheckOrphan()
         {
@@ -125,10 +167,12 @@ namespace ChestDisplay
             }
         }
 
-        /// <summary>Призрак при строительстве: показать, что окажется на табличке у этого сундука.</summary>
-        public void Preview(Container chest)
+        /// <summary>Призрак при строительстве: показать, какой табличка будет на этом месте (иконка, число, размер).</summary>
+        public void Preview(Container chest, float surfaceMin)
         {
-            Show(chest != null ? FirstItem(chest.GetInventory()) : null);
+            Inventory inventory = chest != null ? chest.GetInventory() : null;
+            Show(FirstItem(inventory), inventory);
+            ApplySize(chest != null ? ChestMount.SignSize(surfaceMin) : SignPiece.BoardSize);
         }
 
         private void Link(Container chest)
@@ -144,6 +188,7 @@ namespace ChestDisplay
             {
                 m_chestWear.m_onDestroyed = (Action)Delegate.Combine(m_chestWear.m_onDestroyed, new Action(OnChestDestroyed));
             }
+            RefreshLayout();
             m_dirty = true;
         }
 
@@ -181,17 +226,126 @@ namespace ChestDisplay
             }
         }
 
-        private void Show(ItemDrop.ItemData item)
+        // ================================================================== размер и крышка
+
+        /// <summary>На какой грани висит табличка и какого она размера (по SizePercent и этой поверхности).</summary>
+        private void RefreshLayout()
         {
-            m_item = item;
-            Sprite icon = IconOf(item);
-            if (m_applied && icon == m_shown)
+            ResetPose();
+            if (m_chest != null && ChestMount.TryGetSurface(m_chest, transform, out Face face, out float surfaceMin))
+            {
+                m_face = face;
+                ApplySize(ChestMount.SignSize(surfaceMin));
+            }
+            else
+            {
+                ApplySize(SignPiece.BoardSize);
+            }
+        }
+
+        /// <summary>Табличка квадратная: стороны в плоскости таблички растут одинаково, толщина та же.</summary>
+        private void ApplySize(float size)
+        {
+            if (m_visual == null || m_visual == transform)
             {
                 return;
             }
-            m_applied = true;
-            m_shown = icon;
-            IconArt.Apply(m_iconFilter, m_iconRenderer, icon);
+            float k = size / SignPiece.BoardSize;
+            var scale = new Vector3(k, k, 1f);
+            if (m_visual.localScale != scale)
+            {
+                m_visual.localScale = scale;
+            }
+        }
+
+        /// <summary>
+        /// Табличка на крышке: сундук открыли — переносим её туда, где теперь крышка (та же матрица, что переводит
+        /// закрытую крышку в открытую), закрыли — обратно. Не удалось понять, куда уехала крышка, — на время прячем.
+        /// </summary>
+        private void UpdateLid()
+        {
+            bool open = m_face == Face.Top && ChestMount.IsOpen(m_chest);
+            if (open == m_lidPosed)
+            {
+                return;
+            }
+            if (!open)
+            {
+                ResetPose();
+                return;
+            }
+            m_lidPosed = true;
+            if (m_visual == null || m_visual == transform || !ChestMount.TryLidMotion(m_chest, out Matrix4x4 motion))
+            {
+                if (m_visual != null && m_visual != transform)
+                {
+                    m_visual.gameObject.SetActive(false);
+                }
+                return;
+            }
+            Matrix4x4 local = transform.worldToLocalMatrix * motion * transform.localToWorldMatrix;
+            m_visual.localPosition = local.MultiplyPoint3x4(Vector3.zero);
+            m_visual.localRotation = local.rotation;
+        }
+
+        private void ResetPose()
+        {
+            m_lidPosed = false;
+            if (m_visual == null || m_visual == transform)
+            {
+                return;
+            }
+            m_visual.localPosition = Vector3.zero;
+            m_visual.localRotation = Quaternion.identity;
+            if (!m_visual.gameObject.activeSelf)
+            {
+                m_visual.gameObject.SetActive(true);
+            }
+        }
+
+        // ================================================================== иконка и число
+
+        private void Show(ItemDrop.ItemData item, Inventory inventory)
+        {
+            m_item = item;
+            Sprite icon = IconOf(item);
+            if (!m_applied || icon != m_shown)
+            {
+                m_applied = true;
+                m_shown = icon;
+                IconArt.Apply(m_iconFilter, m_iconRenderer, icon);
+            }
+            ShowCount(icon != null && SignConfig.ShowCount.Value ? Count(item, inventory) : -1);
+        }
+
+        /// <summary>Сколько этого предмета в сундуке — все стопки вместе (как для рецептов, но без отбора по уровню мира).</summary>
+        private static int Count(ItemDrop.ItemData item, Inventory inventory) =>
+            inventory != null ? inventory.CountItems(item.m_shared.m_name, -1, false) : item.m_stack;
+
+        /// <summary>
+        /// Число внизу доски; меньше нуля — спрятать. С числом иконка чуть меньше и выше, чтобы не наезжать на него.
+        /// </summary>
+        private void ShowCount(int count)
+        {
+            if (m_count == null)
+            {
+                return;
+            }
+            bool on = count >= 0;
+            if (m_count.activeSelf != on)
+            {
+                m_count.SetActive(on);
+                if (m_icon != null)
+                {
+                    m_icon.localScale = Vector3.one * (on ? SignPiece.IconScaleWithCount : 1f);
+                    m_icon.localPosition = new Vector3(0f, on ? SignPiece.IconShiftWithCount : 0f, SignPiece.FrontZ);
+                }
+            }
+            if (on && count != m_shownCount)
+            {
+                NumberArt.Apply(m_countFilter, m_countRenderer, DisplayRules.FormatCount(count));
+            }
+            m_shownCount = on ? count : -1;
         }
 
         /// <summary>Предмет в верхней левой занятой ячейке (как его видит игрок) или null, если сундук пуст.</summary>

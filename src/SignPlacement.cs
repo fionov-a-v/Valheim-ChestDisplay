@@ -6,7 +6,8 @@ namespace ChestDisplay
 {
     /// <summary>
     /// Установка таблички молотом. После того как игра расставила призрак постройки, табличка «примагничивается» к сундуку,
-    /// на который смотрит игрок: встаёт по центру его боковой грани, обращённой к игроку, вплотную к поверхности.
+    /// на который смотрит игрок: встаёт по центру его боковой грани, обращённой к игроку (ниже крышки), или ложится
+    /// на крышку, если игрок смотрит на неё сверху, — вплотную к поверхности.
     /// Ставить можно только на общий сундук и только на свободную грань. Не на сундук — призрака нет, на занятую грань —
     /// он красный; при попытке поставить — сообщение с причиной. (Сама игра на сундуки ничего ставить не даёт — у них m_supports = false; для таблички этот
     /// запрет снимается здесь.)
@@ -40,29 +41,30 @@ namespace ChestDisplay
             }
             Player.PlacementStatus status = s_status(player);
             if (status == Player.PlacementStatus.NoRayHits || !ghost.activeSelf ||
-                !RayTest(player, out Vector3 point, out Vector3 normal, out Piece target))
+                !RayTest(player, out _, out Vector3 normal, out Piece target))
             {
-                sign.Preview(null);
+                sign.Preview(null, 0f);
                 s_problem = ChestMount.Problem.None;
                 return;
             }
 
             Container chest = ChestMount.ChestOf(target);
             ChestMount.Problem problem = ChestMount.Check(chest);
-            Vector3 position = Vector3.zero;
-            Quaternion rotation = Quaternion.identity;
+            ChestMount.Mount mount = default;
             if (problem == ChestMount.Problem.None)
             {
                 Vector3 viewer = GameCamera.instance != null ? GameCamera.instance.transform.position : player.transform.position;
-                if (!ChestMount.TryPose(chest, point, normal, viewer, out position, out rotation))
+                if (!ChestMount.TryMount(chest, normal, viewer, out mount))
                 {
                     problem = ChestMount.Problem.NotChest;
                 }
-                else if (ChestMount.Occupied(position))
+                else if (ChestMount.Occupied(mount.Position))
                 {
                     problem = ChestMount.Problem.Occupied;
                 }
             }
+            Vector3 position = mount.Position;
+            Quaternion rotation = mount.Rotation;
 
             // Остальные запреты игры (охранный камень, зона без строительства, мешает игрок) остаются в силе;
             // «Invalid» для таблички означает только «смотрит не на сундук» — его решаем сами.
@@ -70,7 +72,7 @@ namespace ChestDisplay
             if (problem == ChestMount.Problem.None)
             {
                 ghost.transform.SetPositionAndRotation(position, rotation);
-                sign.Preview(chest);
+                sign.Preview(chest, mount.SurfaceMin);
                 if (ours)
                 {
                     status = Player.PlacementStatus.Valid;
@@ -86,7 +88,7 @@ namespace ChestDisplay
             }
             else
             {
-                sign.Preview(null);
+                sign.Preview(null, 0f);
                 if (problem == ChestMount.Problem.Occupied)
                 {
                     // Красный призрак прямо поверх уже висящей таблички — видно, что место занято.

@@ -6,7 +6,8 @@
     <ImplicitUsings>disable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Тот же файл, что в моде: правила таблички (без Unity) -->
+    <!-- Те же файлы, что в моде: правила таблички и рисунок цифр (без Unity) -->
     <Compile Include="../../src/Logic/DisplayRules.cs" Link="Mod/DisplayRules.cs" />
+    <Compile Include="../../src/Visuals/DigitArt.cs" Link="Mod/DigitArt.cs" />
   </ItemGroup>
 </Project>
