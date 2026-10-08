@@ -17,7 +17,7 @@ namespace ChestDisplay.Tests
         private static int s_passed;
 
         /// <summary>Числа для превью: от одной цифры до самых длинных сокращений.</summary>
-        private static readonly string[] s_samples = { "7", "48", "999", "1.2k", "12k", "99k+" };
+        private static readonly string[] s_samples = { "0", "7", "48", "999", "1.2k", "12k", "99k+" };
 
         private static int Main(string[] args)
         {
@@ -26,6 +26,7 @@ namespace ChestDisplay.Tests
             Barrels();
             Sizes();
             Digits();
+            Dimming();
             Fitting();
             Parsing();
 
@@ -140,6 +141,20 @@ namespace ChestDisplay.Tests
                 allDrawn &= opaque > 20;
             }
             Check("каждый символ в атласе нарисован", allDrawn);
+        }
+
+        private static void Dimming()
+        {
+            byte r = 230, g = 200, b = 40; // яркое золото (монеты)
+            IconDim.Dim(ref r, ref g, ref b);
+            Check("яркая иконка гаснет: яркие каналы темнее", r < 230 && g < 200);
+            Check("яркая иконка теряет насыщенность", Math.Max(r, Math.Max(g, b)) - Math.Min(r, Math.Min(g, b)) < 230 - 40);
+            byte cr = 20, cg = 20, cb = 24; // уголь
+            IconDim.Dim(ref cr, ref cg, ref cb);
+            Check("тёмная иконка уходит к цвету доски (светлеет к дереву)", cr > 20 && cr < IconDim.Wood[0]);
+            byte wr = IconDim.Wood[0], wg = IconDim.Wood[1], wb = IconDim.Wood[2];
+            IconDim.Dim(ref wr, ref wg, ref wb);
+            Check("цвет доски почти не меняется (только темнеет)", wr <= IconDim.Wood[0] && wr > IconDim.Wood[0] / 2);
         }
 
         /// <summary>Строка числа, как её собирает мод: клетки атласа одна за другой, со сдвигом по раскладке.</summary>

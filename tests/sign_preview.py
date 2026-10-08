@@ -24,6 +24,12 @@ ICON_SHIFT_WITH_COUNT = 0.045
 PAD = 0.12          # DigitArt.Pad — поля клетки символа в долях высоты
 UNIT_PX = 128       # высота символа в PNG из тестов
 
+# Как в IconDim: тусклая иконка опустевшего сундука.
+DIM_DESATURATE = 0.75
+DIM_FADE = 0.5
+DIM_DARKEN = 0.8
+DIM_WOOD = (74, 56, 34)
+
 PX = 1000           # пикселей на метр в превью
 WOOD_TINT = 0.83    # _Color материала itemstand
 FRAME_TINT = (0.45, 0.40, 0.36)
@@ -40,7 +46,28 @@ def wood(size, tex, tint):
     return Image.merge("RGB", tuple(ch.point(lambda v, k=k: int(v * k)) for ch, k in zip((r, g, b), tint)))
 
 
-def sign(game_dir, icon_name, number, out_dir):
+def faded(icon, desaturate=DIM_DESATURATE, fade=DIM_FADE, wood_rgb=DIM_WOOD, darken=DIM_DARKEN):
+    """Тусклая иконка — как IconDim в моде: цвет к серому, к цвету доски и темнее; альфа та же."""
+    a = icon.split()[3]
+    data = icon.convert("RGB").tobytes()
+    px = []
+    for i in range(0, len(data), 3):
+        cr, cg, cb = data[i], data[i + 1], data[i + 2]
+        l = 0.299 * cr + 0.587 * cg + 0.114 * cb
+        out = []
+        for c, w in zip((cr, cg, cb), wood_rgb):
+            c = c + (l - c) * desaturate
+            c = c + (w - c) * fade
+            c *= darken
+            out.append(int(max(0, min(255, round(c)))))
+        px.append(tuple(out))
+    rgb = Image.new("RGB", icon.size)
+    rgb.putdata(px)
+    rgb.putalpha(a)
+    return rgb
+
+
+def sign(game_dir, icon_name, number, out_dir, dim=None):
     tex = None
     if game_dir and os.path.exists(os.path.join(game_dir, "itemstand_main.png")):
         tex = Image.open(os.path.join(game_dir, "itemstand_main.png"))
@@ -66,6 +93,8 @@ def sign(game_dir, icon_name, number, out_dir):
         scale = ICON_SCALE_WITH_COUNT if number else 1.0
         size = int(ICON * scale * PX)
         icon = icon.resize((size, size), Image.LANCZOS)
+        if dim is not None:
+            icon = dim(icon)
         # В игре иконку режет вырез по альфе (порог 0.5) — без полупрозрачных краёв.
         a = icon.split()[3].point(lambda v: 255 if v >= 128 else 0)
         icon.putalpha(a)
@@ -86,9 +115,11 @@ def sign(game_dir, icon_name, number, out_dir):
 def main():
     out_dir, game_dir, out = sys.argv[1], sys.argv[2], sys.argv[3]
     game_dir = None if game_dir == "-" else game_dir
-    cases = [("wood", None), ("wood", "7"), ("coal", "48"), ("stone", "999"),
-             ("resin", "1.2k"), ("iron", "12k"), ("coins", "99k+")]
-    signs = [sign(game_dir, icon, number, out_dir) for icon, number in cases]
+    # Последние две — опустевший сундук: тусклая иконка (без числа и с «0»).
+    cases = [("wood", None, None), ("wood", "7", None), ("coal", "48", None), ("stone", "999", None),
+             ("resin", "1.2k", None), ("iron", "12k", None), ("coins", "99k+", None),
+             ("coins", None, faded), ("resin", "0", faded)]
+    signs = [sign(game_dir, icon, number, out_dir, dim) for icon, number, dim in cases]
     s = signs[0].width
     gap = 30
     sheet = Image.new("RGB", (len(signs) * (s + gap) + gap, s + 2 * gap + 150), (58, 52, 46))

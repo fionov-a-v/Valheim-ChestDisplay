@@ -11,6 +11,8 @@ namespace ChestDisplay
     /// содержимое: на событие инвентаря сундука (оно приходит и при изменении у этого игрока, и когда игра подгружает
     /// чужие изменения из сети — раз в секунду), плюс редкая проверка на всякий случай. Наведение и «Использовать»
     /// передаются сундуку — сквозь табличку сундук открывается как обычно.
+    /// Опустел сундук — табличка показывает последний предмет тусклым (и «0», если число включено): она помнит его
+    /// в своих сетевых данных, поэтому помнят все игроки и после перезахода.
     /// Размер — по настройке SizePercent от меньшей стороны поверхности, на которой табличка висит. Табличка на крышке
     /// при открытии сундука уезжает вместе с крышкой.
     /// Сундук разрушили или разобрали — табличка снимается вместе с ним (ресурсы выпадают); табличка, за которой сундука
@@ -25,6 +27,10 @@ namespace ChestDisplay
 
         /// <summary>Таблички в мире (без призрака при строительстве).</summary>
         public static readonly List<ChestSign> All = new List<ChestSign>();
+
+        /// <summary>Последний показанный предмет (префаб и вариант) — в ZDO таблички, для тусклой иконки пустого сундука.</summary>
+        private static readonly int s_lastItemKey = "chestdisplay_last_item".GetStableHashCode();
+        private static readonly int s_lastVariantKey = "chestdisplay_last_variant".GetStableHashCode();
 
         private const float SearchInterval = 1f;
         private const float PollInterval = 2f;
@@ -48,6 +54,7 @@ namespace ChestDisplay
         private WearNTear m_chestWear;
         private ItemDrop.ItemData m_item;
         private Sprite m_shown;
+        private bool m_shownDim;
         private bool m_applied;
         private int m_shownCount = -1;
         private bool m_dirty;
@@ -305,17 +312,72 @@ namespace ChestDisplay
 
         // ================================================================== иконка и число
 
+        /// <summary>
+        /// Показать предмет сундука. inventory — сундук, на котором висит табличка (null — сундука нет, табличка пустая).
+        /// Сундук есть, но пуст — тусклый последний предмет, который табличка запомнила, и число 0.
+        /// </summary>
         private void Show(ItemDrop.ItemData item, Inventory inventory)
         {
+            bool dim = false;
+            int variant = item != null ? item.m_variant : 0;
+            if (item != null)
+            {
+                Remember(item);
+            }
+            else if (inventory != null)
+            {
+                item = Remembered(out variant);
+                dim = item != null;
+            }
             m_item = item;
-            Sprite icon = IconOf(item);
-            if (!m_applied || icon != m_shown)
+            Sprite icon = IconOf(item, variant);
+            if (!m_applied || icon != m_shown || dim != m_shownDim)
             {
                 m_applied = true;
                 m_shown = icon;
-                IconArt.Apply(m_iconFilter, m_iconRenderer, icon);
+                m_shownDim = dim;
+                IconArt.Apply(m_iconFilter, m_iconRenderer, icon, dim);
             }
-            ShowCount(icon != null && SignConfig.ShowCount.Value ? Count(item, inventory) : -1);
+            ShowCount(icon != null && SignConfig.ShowCount.Value ? (dim ? 0 : Count(item, inventory)) : -1);
+        }
+
+        /// <summary>Запомнить показанный предмет в ZDO таблички (пишет только её владелец — и только если предмет сменился).</summary>
+        private void Remember(ItemDrop.ItemData item)
+        {
+            ZDO zdo = m_nview != null && m_nview.IsValid() && m_nview.IsOwner() ? m_nview.GetZDO() : null;
+            string name = item.m_dropPrefab != null ? item.m_dropPrefab.name : null;
+            if (zdo == null || string.IsNullOrEmpty(name))
+            {
+                return;
+            }
+            if (zdo.GetString(s_lastItemKey) != name)
+            {
+                zdo.Set(s_lastItemKey, name);
+            }
+            if (zdo.GetInt(s_lastVariantKey) != item.m_variant)
+            {
+                zdo.Set(s_lastVariantKey, item.m_variant);
+            }
+        }
+
+        /// <summary>Запомненный предмет — данные его префаба (иконки, название) и вариант, или null.</summary>
+        private ItemDrop.ItemData Remembered(out int variant)
+        {
+            variant = 0;
+            ZDO zdo = m_nview != null && m_nview.IsValid() ? m_nview.GetZDO() : null;
+            string name = zdo != null ? zdo.GetString(s_lastItemKey) : null;
+            if (string.IsNullOrEmpty(name) || ObjectDB.instance == null)
+            {
+                return null;
+            }
+            GameObject prefab = ObjectDB.instance.GetItemPrefab(name);
+            ItemDrop drop = prefab != null ? prefab.GetComponent<ItemDrop>() : null;
+            if (drop == null)
+            {
+                return null; // предмет из удалённого мода
+            }
+            variant = zdo.GetInt(s_lastVariantKey);
+            return drop.m_itemData;
         }
 
         /// <summary>Сколько этого предмета в сундуке — все стопки вместе (как для рецептов, но без отбора по уровню мира).</summary>
@@ -367,15 +429,14 @@ namespace ChestDisplay
             return best;
         }
 
-        private static Sprite IconOf(ItemDrop.ItemData item)
+        private static Sprite IconOf(ItemDrop.ItemData item, int variant)
         {
             Sprite[] icons = item?.m_shared?.m_icons;
             if (icons == null || icons.Length == 0)
             {
                 return null;
             }
-            int variant = item.m_variant >= 0 && item.m_variant < icons.Length ? item.m_variant : 0;
-            return icons[variant];
+            return icons[variant >= 0 && variant < icons.Length ? variant : 0];
         }
 
         // ================================================================== сквозь табличку — к сундуку

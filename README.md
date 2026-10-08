@@ -30,7 +30,10 @@
    сундуке: табличка сама встанет по центру той боковой грани, которая обращена к вам (ниже крышки), и прижмётся к ней.
    Наведитесь на крышку сверху — табличка ляжет на крышку, повёрнутая так, чтобы читаться с вашего места. Пока вы
    примеряетесь, на призраке уже видна иконка того, что лежит в сундуке.
-2. Поставьте. На табличке — иконка предмета из верхней левой занятой ячейки сундука; пустой сундук — пустая табличка.
+2. Поставьте. На табличке — иконка предмета из верхней левой занятой ячейки сундука. Опустел сундук — табличка
+   показывает последний предмет тусклым, выцветшим в цвет дерева (и «0», если число включено): видно, что здесь
+   хранится, но сейчас этого нет. Табличка помнит предмет и после перезахода, у всех игроков; на только что
+   поставленной табличке у пустого сундука — пусто.
 3. Иконка обновляется сама: сразу, когда вы перекладываете вещи, и в пределах секунды, когда содержимое поменял другой
    игрок.
 4. **«Использовать» на табличке открывает сундук** — табличка не мешает доставать вещи. При наведении видна обычная
@@ -133,7 +136,9 @@ from the server and only admins can change them.
 **Use:** aim at a **shared** chest with the sign selected: it snaps to the center of the chest side facing you (below the
 lid) and sits flush against it; aim at the lid from above and it lies on the lid, turned to read from where you stand.
 The ghost already shows what the sign will display. Once placed, the sign
-shows the icon of the item in the top-left occupied slot (an empty chest — an empty sign). It updates immediately when you
+shows the icon of the item in the top-left occupied slot. When the chest is emptied, the sign keeps showing the last item,
+dim and faded into the wood (and "0" if the count is on), so you still see what belongs there; it remembers the item
+across relogs and for all players. It updates immediately when you
 move items, and within a second when another player changes the chest. **Using the sign opens the chest**, and hovering
 it shows the chest's usual tooltip plus the name of the item on the sign. A sign on the lid moves with the lid when the
 chest is opened. `SizePercent` sets the size: 0% — the standard 34 cm, 100% — the full smaller side of the surface it
@@ -164,6 +169,8 @@ keep the line `Required Notice: Copyright Fionov Alexander (https://github.com/f
 
 ## Changelog
 
+- **1.2.0** — an emptied chest's sign keeps showing the last item, dimmed (faded into the wood), with "0" if the count
+  is on; the sign remembers it across relogs and for all players.
 - **1.1.0** — Valheim 1.0.17. Signs can also lie on top of the lid (and move with it when the chest opens). New settings:
   `SizePercent` (sign size up to the whole chest side or lid) and `ShowItemCount` (item count on the sign, off by default).
   Side signs are centered on the part of the side below the lid.

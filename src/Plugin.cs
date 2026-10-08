@@ -13,7 +13,7 @@ namespace ChestDisplay
     {
         public const string PluginGuid = "chestdisplay";
         public const string PluginName = "Chest Display";
-        public const string PluginVersion = "1.1.0";
+        public const string PluginVersion = "1.2.0";
 
         private Harmony m_harmony;
         private ConfigFileWatcher m_configWatcher;

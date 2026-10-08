@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using ChestDisplay.Logic;
+using ChestDisplay.Visuals;
 using UnityEngine;
+using UnityEngine.Rendering;
 using Logger = Jotunn.Logger;
 
 namespace ChestDisplay
@@ -9,11 +11,13 @@ namespace ChestDisplay
     /// Иконка предмета на табличке. Меш строится из геометрии самого спрайта (вершины и UV атласа — работает и для упакованных
     /// в атлас иконок), материал — на шейдере построек Custom/Piece с вырезом по альфе: иконка освещается как доска под ней
     /// (ночью темнеет, у огня светлеет), а не светится сама. Меши и материалы общие для всех табличек с той же иконкой.
+    /// Для опустевшего сундука — тусклый вариант: та же текстура, выцветшая (IconDim) в копии на процессоре.
     /// </summary>
     internal static class IconArt
     {
         private static readonly Dictionary<Sprite, Mesh> s_meshes = new Dictionary<Sprite, Mesh>();
         private static readonly Dictionary<Texture, Material> s_materials = new Dictionary<Texture, Material>();
+        private static readonly Dictionary<Texture, Material> s_dimMaterials = new Dictionary<Texture, Material>();
         private static Shader s_shader;
         private static bool s_lit;
 
@@ -33,15 +37,16 @@ namespace ChestDisplay
             }
         }
 
-        /// <summary>Показать иконку (или ничего, если null) на рендерере таблички.</summary>
-        public static void Apply(MeshFilter filter, MeshRenderer renderer, Sprite icon)
+        /// <summary>Показать иконку (или ничего, если null) на рендерере таблички; dim — тусклую.</summary>
+        public static void Apply(MeshFilter filter, MeshRenderer renderer, Sprite icon, bool dim = false)
         {
             if (filter == null || renderer == null)
             {
                 return;
             }
             Mesh mesh = icon != null ? MeshFor(icon) : null;
-            Material material = mesh != null ? MaterialFor(icon.texture) : null;
+            Material material = mesh == null ? null
+                : (dim ? DimMaterialFor(icon.texture) : null) ?? MaterialFor(icon.texture);
             if (mesh == null || material == null)
             {
                 renderer.enabled = false;
@@ -160,6 +165,73 @@ namespace ChestDisplay
             }
             s_materials[texture] = m;
             return m;
+        }
+
+        /// <summary>
+        /// Тусклый материал: выцветшая копия текстуры иконок (весь атлас целиком — UV спрайтов те же) с тем же шейдером.
+        /// Текстуры иконок игры не читаются с процессора, поэтому копия снимается с видеокарты: Blit в RenderTexture
+        /// и ReadPixels. Нет видеокарты (выделенный сервер) или копия не удалась — null, будет обычная иконка.
+        /// </summary>
+        private static Material DimMaterialFor(Texture texture)
+        {
+            if (texture == null)
+            {
+                return null;
+            }
+            if (s_dimMaterials.TryGetValue(texture, out Material cached))
+            {
+                return cached;
+            }
+            Material m = null;
+            try
+            {
+                Texture2D dim = DimTexture(texture);
+                m = dim != null ? MaterialFor(dim) : null;
+            }
+            catch (System.Exception e)
+            {
+                Logger.LogWarning($"Chest Display: не удалось сделать тусклую иконку из '{texture.name}': {e.Message}");
+            }
+            s_dimMaterials[texture] = m;
+            return m;
+        }
+
+        private static Texture2D DimTexture(Texture source)
+        {
+            if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
+            {
+                return null;
+            }
+            int w = source.width, h = source.height;
+            // Default (sRGB) туда и обратно: байты копии — те же, что в исходной текстуре.
+            RenderTexture rt = RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Default);
+            RenderTexture previous = RenderTexture.active;
+            var copy = new Texture2D(w, h, TextureFormat.RGBA32, true)
+            {
+                name = source.name + "_chestdisplay_dim",
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = source.filterMode,
+                anisoLevel = source.anisoLevel,
+            };
+            try
+            {
+                Graphics.Blit(source, rt);
+                RenderTexture.active = rt;
+                copy.ReadPixels(new Rect(0, 0, w, h), 0, 0, false);
+            }
+            finally
+            {
+                RenderTexture.active = previous;
+                RenderTexture.ReleaseTemporary(rt);
+            }
+            Color32[] px = copy.GetPixels32();
+            for (int i = 0; i < px.Length; i++)
+            {
+                IconDim.Dim(ref px[i].r, ref px[i].g, ref px[i].b);
+            }
+            copy.SetPixels32(px);
+            copy.Apply(true, true);
+            return copy;
         }
 
         private static void SetFloat(Material m, string name, float value)

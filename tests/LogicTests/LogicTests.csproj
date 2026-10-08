@@ -9,5 +9,6 @@
     <!-- Те же файлы, что в моде: правила таблички и рисунок цифр (без Unity) -->
     <Compile Include="../../src/Logic/DisplayRules.cs" Link="Mod/DisplayRules.cs" />
     <Compile Include="../../src/Visuals/DigitArt.cs" Link="Mod/DigitArt.cs" />
+    <Compile Include="../../src/Visuals/IconDim.cs" Link="Mod/IconDim.cs" />
   </ItemGroup>
 </Project>
