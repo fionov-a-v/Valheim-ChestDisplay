@@ -58,10 +58,12 @@
        Если игра запущена, Windows держит DLL занятой — тогда только предупреждение, сборка не падает. -->
   <Target Name="DeployToGame" AfterTargets="Build" Condition="Exists('$(BepInExDir)/plugins') And '$(SkipDeploy)' != 'true'">
     <!-- Под работающей игрой DLL подменять нельзя: по SMB Windows загруженный файл не блокирует, и Mono дочитывает код
-         методов уже из нового файла — мод падает с BadImageFormatException. Игра закрыта, если лог BepInEx кончается
-         выходом из неё (или лога нет). Скопировать всё равно: -p:ForceDeploy=true. -->
+         методов уже из нового файла — мод падает с BadImageFormatException. Лог BepInEx пишется заново при каждом
+         запуске, поэтому игра закрыта, если в нём есть выход из игры (или лога нет). Строки выхода ищутся во всём файле:
+         после них моды ещё снимают патчи, и лог продолжается. «Net scene destroyed» не годится — она бывает и при выходе
+         в главное меню. Скопировать всё равно: -p:ForceDeploy=true. -->
     <Exec Condition="'$(OS)' != 'Windows_NT' And '$(ForceDeploy)' != 'true' And Exists('$(BepInExDir)/LogOutput.log')"
-          Command="tail -n 8 &quot;$(BepInExDir)/LogOutput.log&quot; | grep -q -e 'Net scene destroyed' -e 'Steam manager on destroy' -e 'OnApplicationQuit'"
+          Command="grep -q -e 'Game - OnApplicationQuit' -e 'Shutting down' -e 'Steam manager on destroy' &quot;$(BepInExDir)/LogOutput.log&quot;"
           IgnoreExitCode="true" StandardOutputImportance="low">
       <Output TaskParameter="ExitCode" PropertyName="GameStoppedCode" />
     </Exec>
@@ -69,7 +71,7 @@
       <GameRunning Condition="'$(GameStoppedCode)' != '' And '$(GameStoppedCode)' != '0'">true</GameRunning>
     </PropertyGroup>
     <Warning Condition="'$(GameRunning)' == 'true'"
-             Text="Игра, похоже, запущена (лог BepInEx не кончается выходом из неё) — ChestDisplay.dll в игру НЕ скопирована: подмена DLL под работающей игрой ломает мод. Закройте игру и соберите снова (или -p:ForceDeploy=true)." />
+             Text="Игра, похоже, запущена (в логе BepInEx нет выхода из неё) — ChestDisplay.dll в игру НЕ скопирована: подмена DLL под работающей игрой ломает мод. Закройте игру и соберите снова (или -p:ForceDeploy=true, если игра закрыта, но упала)." />
     <!-- На Linux папка игры — SMB-шара через gvfs: задача Copy там падает на установке атрибутов, cp работает -->
     <Exec Condition="'$(OS)' != 'Windows_NT' And '$(GameRunning)' != 'true'" Command="cp -f &quot;$(TargetPath)&quot; &quot;$(BepInExDir)/plugins/ChestDisplay.dll&quot;" ContinueOnError="WarnAndContinue" />
     <Copy Condition="'$(OS)' == 'Windows_NT'" SourceFiles="$(TargetPath)" DestinationFolder="$(BepInExDir)/plugins" ContinueOnError="WarnAndContinue" />
