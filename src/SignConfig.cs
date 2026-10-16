@@ -5,7 +5,7 @@ namespace ChestDisplay
 {
     /// <summary>
     /// Настройки мода. Рецепт и размер синхронизируются с сервера (Jotunn, IsAdminOnly), поэтому у всех игроков на сервере
-    /// табличка одинаковая; показ количества — у каждого игрока свой.
+    /// табличка одинаковая; показ количества и тусклой иконки опустевшего сундука — у каждого игрока свой.
     /// </summary>
     internal static class SignConfig
     {
@@ -17,11 +17,12 @@ namespace ChestDisplay
 
         public static ConfigEntry<int> SizePercent;
         public static ConfigEntry<bool> ShowCount;
+        public static ConfigEntry<bool> KeepLastItem;
 
         /// <summary>Поменялись рецепт, станок или «можно строить» — надо переприменить к префабу.</summary>
         public static event Action RecipeChanged;
 
-        /// <summary>Поменялся вид табличек (размер, показ количества) — пересчитать уже висящие.</summary>
+        /// <summary>Поменялся вид табличек (размер, количество, память предмета) — пересчитать уже висящие.</summary>
         public static event Action LookChanged;
 
         public static void Bind(ConfigFile cfg)
@@ -57,6 +58,12 @@ namespace ChestDisplay
                     "Показывать внизу таблички, сколько её предмета в сундуке (все стопки вместе; большие числа " +
                     "сокращаются: 1.2k, 12k, 99k+); только для этого клиента."));
             ShowCount.SettingChanged += (_, _) => LookChanged?.Invoke();
+            KeepLastItem = cfg.Bind(client, "KeepLastItem", true,
+                Text("When a chest is emptied, keep showing its last item on the sign, dimmed (\"0\" if the count is on); " +
+                     "off — the sign of an empty chest is blank. This client only.",
+                    "Когда сундук опустел, показывать на табличке его последний предмет тусклым («0», если число включено); " +
+                    "выключено — у пустого сундука табличка пустая. Только для этого клиента."));
+            KeepLastItem.SettingChanged += (_, _) => LookChanged?.Invoke();
         }
 
         /// <summary>Описание настройки на двух языках: в .cfg — строка по-английски и под ней по-русски.</summary>

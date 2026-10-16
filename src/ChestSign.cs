@@ -324,8 +324,9 @@ namespace ChestDisplay
             {
                 Remember(item);
             }
-            else if (inventory != null)
+            else if (inventory != null && SignConfig.KeepLastItem.Value)
             {
+                // Запоминается всегда (Remember выше), показывается — по настройке KeepLastItem.
                 item = Remembered(out variant);
                 dim = item != null;
             }

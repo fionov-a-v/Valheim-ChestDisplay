@@ -33,7 +33,8 @@
 2. Поставьте. На табличке — иконка предмета из верхней левой занятой ячейки сундука. Опустел сундук — табличка
    показывает последний предмет тусклым, выцветшим в цвет дерева (и «0», если число включено): видно, что здесь
    хранится, но сейчас этого нет. Табличка помнит предмет и после перезахода, у всех игроков; на только что
-   поставленной табличке у пустого сундука — пусто.
+   поставленной табличке у пустого сундука — пусто. Не нужно — выключите `KeepLastItem`, и у пустого сундука
+   табличка будет пустой.
 3. Иконка обновляется сама: сразу, когда вы перекладываете вещи, и в пределах секунды, когда содержимое поменял другой
    игрок.
 4. **«Использовать» на табличке открывает сундук** — табличка не мешает доставать вещи. При наведении видна обычная
@@ -76,6 +77,7 @@
 | | `CraftingStation` | `piece_workbench` | Станок, рядом с которым строится (пусто — без станка) |
 | 2 - Sign | `SizePercent` | 50 | Размер, %: 0 — стандартный (34 см), 100 — во всю меньшую сторону поверхности |
 | 3 - Client | `ShowItemCount` | false | Показывать на табличке количество предмета в сундуке |
+| | `KeepLastItem` | true | У опустевшего сундука показывать последний предмет тусклым (выключено — табличка пустая) |
 
 Разделы 1–2 синхронизируются с сервера, раздел 3 — у каждого игрока свой. В панели постройки у молота 6 ячеек
 на ресурсы и станок вместе: станок помещается, только если ресурсов 5 или меньше. Если в `Cost` больше 5 предметов, табличка строится без станка
@@ -138,7 +140,7 @@ lid) and sits flush against it; aim at the lid from above and it lies on the lid
 The ghost already shows what the sign will display. Once placed, the sign
 shows the icon of the item in the top-left occupied slot. When the chest is emptied, the sign keeps showing the last item,
 dim and faded into the wood (and "0" if the count is on), so you still see what belongs there; it remembers the item
-across relogs and for all players. It updates immediately when you
+across relogs and for all players (turn `KeepLastItem` off for a blank sign instead). It updates immediately when you
 move items, and within a second when another player changes the chest. **Using the sign opens the chest**, and hovering
 it shows the chest's usual tooltip plus the name of the item on the sign. A sign on the lid moves with the lid when the
 chest is opened. `SizePercent` sets the size: 0% — the standard 34 cm, 100% — the full smaller side of the surface it
@@ -158,7 +160,7 @@ first item — exactly what the sign shows.
 
 **Config** (`BepInEx/config/chestdisplay.cfg`, or F1 Configuration Manager): `Enabled`, `Cost` (Item:Amount separated by
 commas), `CraftingStation` (empty — no station needed), `SizePercent` (0–100, default 50) — synced from the server; `ShowItemCount`
-(default off) — per client. The build panel has 6 slots
+(default off), `KeepLastItem` (default on) — per client. The build panel has 6 slots
 for ingredients and the station together, so with more than 5 ingredients the station is dropped (with a warning in the
 log).
 
@@ -169,6 +171,8 @@ keep the line `Required Notice: Copyright Fionov Alexander (https://github.com/f
 
 ## Changelog
 
+- **1.2.1** — the dimmed last item of an emptied chest is now optional: `KeepLastItem` (per client, on by default);
+  turned off, an empty chest's sign is blank. The sign keeps remembering the item, so turning it back on restores the icon.
 - **1.2.0** — an emptied chest's sign keeps showing the last item, dimmed (faded into the wood), with "0" if the count
   is on; the sign remembers it across relogs and for all players.
 - **1.1.0** — Valheim 1.0.17. Signs can also lie on top of the lid (and move with it when the chest opens). New settings:
