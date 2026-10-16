@@ -27,6 +27,7 @@ namespace ChestDisplay.Tests
             Sizes();
             Digits();
             Dimming();
+            Profiles();
             Fitting();
             Parsing();
 
@@ -142,6 +143,64 @@ namespace ChestDisplay.Tests
             }
             Check("каждый символ в атласе нарисован", allDrawn);
         }
+
+        /// <summary>Профили боковин, снятые лучами с моделей игры (см глубины через 3 см по высоте).</summary>
+        private static void Profiles()
+        {
+            // Каменный сундук Пепельных земель: плинтус 18 см, стенка утоплена на 16 см, под крышкой обод -12.
+            float[] grausten = Cm(-1, -1, -2, -2, -1, -1, -16, -16, -16, -16, -16, -16, -16, -16, -16, -16, -16, -16, -16, -16, -16, -12, -12, -12);
+            Check("каменный: участок — стенка между плинтусом и ободом",
+                DisplayRules.LongestSmoothRun(grausten, 0.035f, out int f, out int t) && f == 6 && t == 20);
+            float[] ys = Heights(grausten.Length);
+            DisplayRules.FitOuterLine(ys, grausten, 6, 20, 0.7f, out float slope, out float offset);
+            Check("каменный: стенка вертикальна и на -16 см", Near2(slope, 0f) && Near2(offset + slope * 0.4f, -0.16f));
+
+            // Деревянный сундук, бок: к верху уходит внутрь до -17 см, оковка даёт выступы в 3 см — это не ступенька.
+            float[] wood = Cm(0, -1, -2, -2, -3, -3, -4, -5, -3, -6, -6, -7, -8, -7, -4, -5, -6, -8, -10, -11, -12, -13, -14, -15, -17);
+            Check("деревянный бок: весь профиль — один участок",
+                DisplayRules.LongestSmoothRun(wood, 0.035f, out f, out t) && f == 0 && t == wood.Length - 1);
+            ys = Heights(wood.Length);
+            DisplayRules.FitOuterLine(ys, wood, f, t, 0.7f, out slope, out offset);
+            bool touches = true, above = true;
+            float worst = float.MaxValue;
+            for (int i = f; i <= t; i++)
+            {
+                float gap = offset + slope * ys[i] - wood[i];
+                above &= gap >= -1e-5f;
+                worst = Math.Min(worst, gap);
+            }
+            touches = Near2(worst, 0f);
+            Check("деревянный бок: наклон внутрь (табличка ляжет вдоль стенки)", slope < -0.1f && slope > -0.4f);
+            Check("деревянный бок: прямая не ниже ни одной точки и касается выступа", above && touches);
+
+            Check("провал луча (NaN) разрывает участок",
+                DisplayRules.LongestSmoothRun(new[] { -0.05f, -0.05f, float.NaN, -0.05f, -0.05f, -0.05f }, 0.035f, out f, out t) && f == 3 && t == 5);
+            Check("ни одного замера — участка нет", !DisplayRules.LongestSmoothRun(new[] { float.NaN, float.NaN }, 0.035f, out _, out _));
+            DisplayRules.FitOuterLine(Heights(4), new[] { 0f, -0.5f, -1f, -1.5f }, 0, 3, 0.7f, out slope, out _);
+            Check("слишком крутой наклон ограничен", Near2(slope, -0.7f));
+        }
+
+        private static float[] Cm(params int[] cm)
+        {
+            var r = new float[cm.Length];
+            for (int i = 0; i < cm.Length; i++)
+            {
+                r[i] = cm[i] / 100f;
+            }
+            return r;
+        }
+
+        private static float[] Heights(int n)
+        {
+            var r = new float[n];
+            for (int i = 0; i < n; i++)
+            {
+                r[i] = 0.015f + 0.03f * i;
+            }
+            return r;
+        }
+
+        private static bool Near2(float a, float b) => Math.Abs(a - b) < 0.005f;
 
         private static void Dimming()
         {

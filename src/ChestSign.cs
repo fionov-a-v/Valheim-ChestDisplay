@@ -63,10 +63,17 @@ namespace ChestDisplay
         private int m_orphanSearches;
 
         private Face m_face = Face.PosZ;
+
+        /// <summary>Сдвиг вида от корня до правильного места на грани (см. RefreshLayout), в координатах корня.</summary>
+        private Vector3 m_baseOffset;
+        private Quaternion m_baseRotation = Quaternion.identity;
         private bool m_lidPosed;
 
         /// <summary>Сундук, на котором висит табличка (null, пока не найден).</summary>
         public Container Chest => m_chest;
+
+        /// <summary>Где табличка видна (вид мог быть подтянут на поверхность сундука относительно корня).</summary>
+        public Vector3 VisualPosition => m_visual != null ? m_visual.position : transform.position;
 
         /// <summary>Настройки вида поменялись (размер, количество) — пересчитать все таблички.</summary>
         public static void RefreshAll()
@@ -236,18 +243,40 @@ namespace ChestDisplay
         // ================================================================== размер и крышка
 
         /// <summary>На какой грани висит табличка и какого она размера (по SizePercent и этой поверхности).</summary>
+        /// <summary>
+        /// Табличка на боковине встаёт туда, где ей положено быть сейчас: по центру ровного участка стенки ниже крышки,
+        /// вплотную к видимой поверхности и вдоль неё, если стенка наклонная. Сдвигается только вид (с коллайдером), корень остаётся на месте — каждый клиент считает это сам,
+        /// одинаково, без записи в сеть. Так чинятся таблички, поставленные раньше: утопленные в модель (у каменного
+        /// сундука коллайдер меньше модели) или висящие выше центра (1.0.0).
+        /// </summary>
         private void RefreshLayout()
         {
-            ResetPose();
+            m_baseOffset = Vector3.zero;
+            m_baseRotation = Quaternion.identity;
+            ExtendCollider(0f);
             if (m_chest != null && ChestMount.TryGetSurface(m_chest, transform, out Face face, out float surfaceMin))
             {
                 m_face = face;
-                ApplySize(ChestMount.SignSize(surfaceMin));
+                float size = ChestMount.SignSize(surfaceMin);
+                ApplySize(size);
+                if (ChestMount.TryIdealSidePose(m_chest, face, size, out Vector3 ideal, out Quaternion idealRotation, out float gap))
+                {
+                    Vector3 offset = transform.InverseTransformPoint(ideal);
+                    Quaternion turn = Quaternion.Inverse(transform.rotation) * idealRotation;
+                    // Больше полуметра или 45° — что-то не так (табличка не на этой грани): не трогаем.
+                    if (offset.magnitude < 0.5f && Quaternion.Angle(Quaternion.identity, turn) < 45f)
+                    {
+                        m_baseOffset = offset;
+                        m_baseRotation = turn;
+                        ExtendCollider(gap);
+                    }
+                }
             }
             else
             {
                 ApplySize(SignPiece.BoardSize);
             }
+            ResetPose();
         }
 
         /// <summary>Табличка квадратная: стороны в плоскости таблички растут одинаково, толщина та же.</summary>
@@ -295,6 +324,24 @@ namespace ChestDisplay
             m_visual.localRotation = local.rotation;
         }
 
+        /// <summary>
+        /// Коллайдер таблички — вперёд на gap: если коллайдер сундука выступает перед стенкой, иначе прицел (наведение,
+        /// молот) упирался бы в сундук и табличку нельзя было бы снять, не задев сундук.
+        /// </summary>
+        private void ExtendCollider(float gap)
+        {
+            BoxCollider box = m_visual != null ? m_visual.GetComponentInChildren<BoxCollider>(true) : null;
+            if (box == null)
+            {
+                return;
+            }
+            gap = Mathf.Clamp(gap, 0f, 0.3f) + (gap > 0.001f ? 0.01f : 0f);
+            // Объект коллайдера у ванильной таблички повёрнут на 180° — вперёд таблички переводим в его координаты.
+            Vector3 forward = Quaternion.Inverse(box.transform.localRotation) * Vector3.forward;
+            box.center = forward * (gap * 0.5f);
+            box.size = new Vector3(SignPiece.BoardSize, SignPiece.BoardSize, SignPiece.Thickness + gap);
+        }
+
         private void ResetPose()
         {
             m_lidPosed = false;
@@ -302,8 +349,8 @@ namespace ChestDisplay
             {
                 return;
             }
-            m_visual.localPosition = Vector3.zero;
-            m_visual.localRotation = Quaternion.identity;
+            m_visual.localPosition = m_baseOffset;
+            m_visual.localRotation = m_baseRotation;
             if (!m_visual.gameObject.activeSelf)
             {
                 m_visual.gameObject.SetActive(true);

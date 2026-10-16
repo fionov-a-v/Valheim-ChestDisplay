@@ -168,6 +168,73 @@ namespace ChestDisplay.Logic
         public static bool StationFits(int resources, int slots) => resources < slots;
 
         /// <summary>
+        /// Самый длинный ровный участок профиля боковины: подряд идущие замеры глубины (float.NaN — луч не попал), соседние
+        /// отличаются не больше чем на maxStep. Ступеньки — плинтус, обод под крышкой — участок разрывают. При равной длине —
+        /// тот, что ближе к середине. false — ни одного замера.
+        /// </summary>
+        public static bool LongestSmoothRun(IList<float> depths, float maxStep, out int from, out int to)
+        {
+            from = to = -1;
+            int bestLen = 0;
+            float mid = (depths.Count - 1) * 0.5f;
+            int start = -1;
+            for (int i = 0; i <= depths.Count; i++)
+            {
+                bool ok = i < depths.Count && !float.IsNaN(depths[i]);
+                bool joins = ok && start >= 0 && Math.Abs(depths[i] - depths[i - 1]) <= maxStep;
+                if (ok && start < 0)
+                {
+                    start = i;
+                    continue;
+                }
+                if (joins)
+                {
+                    continue;
+                }
+                if (start >= 0)
+                {
+                    int end = i - 1, len = end - start + 1;
+                    float center = (start + end) * 0.5f;
+                    if (len > bestLen || (len == bestLen && Math.Abs(center - mid) < Math.Abs((from + to) * 0.5f - mid)))
+                    {
+                        bestLen = len;
+                        from = start;
+                        to = end;
+                    }
+                }
+                start = ok ? i : -1;
+            }
+            return bestLen > 0;
+        }
+
+        /// <summary>
+        /// Прямая depth = offset + slope · y по участку [from, to] (наименьшие квадраты), сдвинутая наружу так, чтобы
+        /// все замеры были не выше неё: она касается самых выступающих точек — табличка ляжет на них и нигде не утонет.
+        /// Наклон ограничен maxSlope (больше — не стенка, а что-то иное).
+        /// </summary>
+        public static void FitOuterLine(IList<float> ys, IList<float> depths, int from, int to, float maxSlope,
+            out float slope, out float offset)
+        {
+            int n = to - from + 1;
+            double sy = 0, sd = 0, syy = 0, syd = 0;
+            for (int i = from; i <= to; i++)
+            {
+                sy += ys[i];
+                sd += depths[i];
+                syy += ys[i] * ys[i];
+                syd += ys[i] * depths[i];
+            }
+            double den = n * syy - sy * sy;
+            slope = n > 1 && Math.Abs(den) > 1e-12 ? (float)((n * syd - sy * sd) / den) : 0f;
+            slope = Math.Max(-maxSlope, Math.Min(maxSlope, slope));
+            offset = float.NegativeInfinity;
+            for (int i = from; i <= to; i++)
+            {
+                offset = Math.Max(offset, depths[i] - slope * ys[i]);
+            }
+        }
+
+        /// <summary>
         /// «Предмет:Кол-во, Предмет:Кол-во» → список пар. Количество по умолчанию 1; неверные части пропускаются
         /// (их текст попадает в <paramref name="errors"/>).
         /// </summary>
