@@ -171,6 +171,10 @@ keep the line `Required Notice: Copyright Fionov Alexander (https://github.com/f
 
 ## Changelog
 
+- **1.2.2** — signs sit on the visible wall of the chest: on the Ashlands Grausten chest they no longer sink into the
+  stone on the sides and back (its collider is smaller than the model) or float in front of it; on slanted sides (wood,
+  reinforced, black metal chests) they follow the slope; on the stone chest they stay above the plinth. Signs already
+  placed fix themselves when the chest loads.
 - **1.2.1** — the dimmed last item of an emptied chest is now optional: `KeepLastItem` (per client, on by default);
   turned off, an empty chest's sign is blank. The sign keeps remembering the item, so turning it back on restores the icon.
 - **1.2.0** — an emptied chest's sign keeps showing the last item, dimmed (faded into the wood), with "0" if the count
